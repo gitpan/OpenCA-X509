@@ -54,7 +54,7 @@ use strict;
 
 package OpenCA::X509;
 
-$OpenCA::X509::VERSION = '0.9.3a';
+$OpenCA::X509::VERSION = '0.9.6a';
 
 my %params = (
 	cert => undef,
@@ -210,10 +210,10 @@ sub parseCert {
         	$ret->{SERIAL} = "0" . $ret->{SERIAL};
 	};
         $ret->{SERIAL} = uc( $ret->{SERIAL} );
-
+	$ret->{DN} =~ s/\,/\//;
 				
 	## Split the Subject into separate fields
-	@dnList = split( /[\,\/]+/, $ret->{DN} );
+	@dnList = split( /\//, $ret->{DN} );
 
 	## Analyze each field
 	foreach $tmp (@dnList) {
@@ -234,6 +234,9 @@ sub parseCert {
 
 	## Parse Certificate and set right values;
 	( $ret->{VERSION} ) = ( $textCert =~ /Version: ([a-f\d]+)/i );
+
+        ( $ret->{SIG_ALGORITHM} ) =
+			 ( $textCert =~ /Signature Algorithm: ([^\n]+)/i );
 
         ( $ret->{PK_ALGORITHM} ) =
 			 ( $textCert =~ /Public Key Algorithm: ([^\n]+)/i );
