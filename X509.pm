@@ -49,18 +49,24 @@
 ## copied and put under another distribution licence
 ## [including the GNU Public Licence.]
 ##
+
+use strict;
+
 package OpenCA::X509;
 
-$VERSION = '0.8.38';
+$OpenCA::X509::VERSION = '0.9.3a';
 
 my %params = (
-	 cert => undef,
-	 pemCert => undef,
-	 derCert => undef,
-	 txtCert => undef,
-	 backend => undef,
-	 parsedCert => undef,
-	 certFormat => "PEM",
+	cert => undef,
+	item => undef,
+	pemCert => undef,
+	derCert => undef,
+	txtCert => undef,
+	backend => undef,
+	parsedItem => undef,
+	beginHeader => undef,
+	endHeader   => undef,
+	certFormat => undef,
 );
 
 ## Create an instance of the Class
@@ -75,17 +81,16 @@ sub new {
         bless $self, $class;
 
 	my $keys = { @_ };
-	my $infile, $tmp;
+	my ( $infile, $tmp );
 
         $self->{cert} 	    = $keys->{DATA};
-	$self->{certFormat} = $keys->{FORMAT};
+	$self->{certFormat} = ( $keys->{FORMAT} or $keys->{INFORM} or "PEM" );
 	$infile		    = $keys->{INFILE};
 
 	$self->{backend}    = $keys->{SHELL};
 
-        if( "$self->{certFormat}" eq "" ) {
-                $self->{certFormat} = "PEM";
-        }
+	$self->{beginHeader}= "-----BEGIN HEADER-----";
+	$self->{endHeader}  = "-----END HEADER-----";
 
 	if( $infile ) {
 		$self->{cert} = "";
@@ -98,6 +103,9 @@ sub new {
 	}
 
 	if ( $self->{cert} ne "" ) {
+		$self->{item} = $self->{cert};
+		$self->{cert} = $self->getBody( ITEM=>$self->{item} );
+
 		if ( not $self->initCert( CERTIFICATE=>$self->{cert},
 					  FORMAT=>$self->{certFormat})) {
 			return;
@@ -112,37 +120,70 @@ sub initCert {
 	my $self = shift;
 	my $keys = { @_ };
 
-	$self->{cert} = $keys->{CERTIFICATE};
-	$self->{certFormat} =>$keys->{FORMAT};
-
 	return if (not $self->{cert});
 
 	$self->{pemCert} = $self->{backend}->dataConvert( DATA=>$self->{cert},
-					DATATYPE=>CERTIFICATE,
+					DATATYPE=>"CERTIFICATE",
 					INFORM=>$self->{certFormat},
-					OUTFORM=>PEM );
+					OUTFORM=>"PEM" );
 	$self->{derCert} = $self->{backend}->dataConvert( DATA=>$self->{cert},
-					DATATYPE=>CERTIFICATE,
+					DATATYPE=>"CERTIFICATE",
 					INFORM=>$self->{certFormat},
-					OUTFORM=>DER );
+					OUTFORM=>"DER" );
 	$self->{txtCert} = $self->{backend}->dataConvert( DATA=>$self->{cert},
-					DATATYPE=>CERTIFICATE,
+					DATATYPE=>"CERTIFICATE",
 					INFORM=>$self->{certFormat},
-					OUTFORM=>TXT );
+					OUTFORM=>"TXT" );
 
-	$self->{parsedCert} = $self->parseCert( CERTIFICATE=> $self->{txtCert} );
+	$self->{parsedItem} = $self->parseCert( CERTIFICATE=>$self->{txtCert} );
 
 	return if ( (not $self->{pemCert}) or (not $self->{derCert})
-		 or (not $self->{txtCert})  or (not $self->{parsedCert}) );
+		 or (not $self->{txtCert})  or (not $self->{parsedItem}) );
 
 	return 1;
+}
+
+sub getHeader {
+	my $self = shift;
+	my $keys = { @_ };
+	my $req = $keys->{ITEM};
+
+	my ( $txt, $ret, $i, $key, $val );
+
+	my $beginHeader = $self->{beginHeader};
+	my $endHeader = $self->{endHeader};
+
+	if( ($txt) = ( $req =~ /$beginHeader\n([\S\s\n]+)\n$endHeader/m) ) {
+		foreach $i ( split ( /\n/, $txt ) ) {
+			$i =~ s/\s*=\s*/=/;
+			( $key, $val ) = ( $i =~ /(.*)\s*=\s*(.*)\s*/ );
+			$ret->{$key} = $val;
+		}
+	}
+
+	return $ret;
+}
+
+sub getBody {
+	my $self = shift;
+	my $keys = { @_ };
+
+	my $ret = $keys->{ITEM};
+
+	my $beginHeader 	= $self->{beginHeader};
+	my $endHeader 		= $self->{endHeader};
+
+	## Let's throw away text between the two headers, included
+	$ret =~ s/($beginHeader[\S\s\n]+$endHeader\n)//;
+
+	return $ret
 }
 
 sub getParsed {
 	my $self = shift;
 
-	return if ( not $self->{parsedCert} );
-	return $self->{parsedCert};
+	return if ( not $self->{parsedItem} );
+	return $self->{parsedItem};
 }
 
 sub parseCert {
@@ -153,30 +194,30 @@ sub parseCert {
 	my $textCert = $keys->{CERTIFICATE};
 	my @dnList = ();
 
-	my @ouList;
-	my @exts;
-	
-	my $ret;
+	my ( @ouList, @exts, $ret, $k, $v, $tmp );
 
 	return if (not $textCert);
 
-	## Parse Certificate and set right values;
-	( $ret->{VERSION} ) = ( $textCert =~ /Version: ([a-e\d]+)/i );
-        ( $ret->{SERIAL} )  = ( $textCert =~ /Serial Number:[^x]*.([^\)]+)/i );
-        ( $ret->{DN} )      = ( $textCert =~ /Subject: ([^\n]+)/i );
+	my @attList = ( "SERIAL", "DN", "ISSUER", "NOTBEFORE", "NOTAFTER",
+			"ALIAS", "MODULUS", "KEY", "FINGERPRINT" );
+
+	for $k ( @attList ) {
+		$ret->{$k} = $self->{backend}->getCertAttribute(
+				ATTRIBUTE=>$k, DATA=>$self->getPEM());
+	};
 
 	if ( length( $ret->{SERIAL} ) % 2 ) {
         	$ret->{SERIAL} = "0" . $ret->{SERIAL};
 	};
-
         $ret->{SERIAL} = uc( $ret->{SERIAL} );
 
+				
 	## Split the Subject into separate fields
 	@dnList = split( /[\,\/]+/, $ret->{DN} );
 
 	## Analyze each field
 	foreach $tmp (@dnList) {
-		my $key, $val;
+		my ( $key, $val );
 
 		next if ( not $tmp );
 
@@ -191,19 +232,21 @@ sub parseCert {
 		}
 	}
 
-        ( $ret->{ISSUER} ) = ( $textCert =~ /Issuer: ([^\n]+)/i );
-
-        ( $ret->{NOT_BEFORE} ) = ( $textCert =~ /Not Before: ([^\n]+)/i );
-        ( $ret->{NOT_AFTER} )  = ( $textCert =~ /Not after : ([^\n]+)/i );
+	## Parse Certificate and set right values;
+	( $ret->{VERSION} ) = ( $textCert =~ /Version: ([a-f\d]+)/i );
 
         ( $ret->{PK_ALGORITHM} ) =
 			 ( $textCert =~ /Public Key Algorithm: ([^\n]+)/i );
 
-        ( $ret->{MODULUS} )  = ( $textCert =~ /Modulus \(([\d]+)/i );
+        ( $ret->{KEYSIZE} )  = ( $textCert =~ /Modulus \(([\d]+)/i );
         ( $ret->{EXPONENT} ) = ( $textCert =~ /Exponent: ([\d]+)/i );
 
         ( $ret->{EXTS} ) = [ @exts ];
         ( $ret->{OU} )   = [ @ouList ];
+
+	$ret->{BODY} 	= $self->getBody( ITEM => $self->{item} );
+	$ret->{HEADER} 	= $self->getHeader( ITEM=> $self->{item} );
+	$ret->{ITEM} 	= $ret->{BODY};
 
 	return $ret;
 }
@@ -317,10 +360,10 @@ PEM.
 
 	EXAMPLE:
 
-		my $self->{parsedCert} = $x509->parseCertificate();
+		my $self->{parsedItem} = $x509->parseCertificate();
 
-		print $self->{parsedCert}->{SERIAL};
-		foreach $ou ( @{ $self->{parsedCert}->{OU} } ) {
+		print $self->{parsedItem}->{SERIAL};
+		foreach $ou ( @{ $self->{parsedItem}->{OU} } ) {
 			print "OU=$ou, ";
 		}
 

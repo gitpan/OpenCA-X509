@@ -4,4 +4,5 @@ use ExtUtils::MakeMaker;
 WriteMakefile(
     'NAME'	=> 'OpenCA::X509',
     'VERSION_FROM' => 'X509.pm', # finds $VERSION
+    'PREREQ_PM' => 'OpenCA::OpenSSL',
 );
