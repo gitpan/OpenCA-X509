@@ -54,7 +54,7 @@ use strict;
 
 package OpenCA::X509;
 
-$OpenCA::X509::VERSION = '0.9.6a';
+$OpenCA::X509::VERSION = '0.9.8';
 
 my %params = (
 	cert => undef,
@@ -199,12 +199,14 @@ sub parseCert {
 	return if (not $textCert);
 
 	my @attList = ( "SERIAL", "DN", "ISSUER", "NOTBEFORE", "NOTAFTER",
-			"ALIAS", "MODULUS", "KEY", "FINGERPRINT" );
+			"ALIAS", "MODULUS", "KEY", "FINGERPRINT", "HASH" );
 
-	for $k ( @attList ) {
-		$ret->{$k} = $self->{backend}->getCertAttribute(
-				ATTRIBUTE=>$k, DATA=>$self->getPEM());
-	};
+#	for $k ( @attList ) {
+#		$ret->{$k} = $self->{backend}->getCertAttribute(
+#				ATTRIBUTE=>$k, DATA=>$self->getPEM());
+#	};
+	$ret = $self->{backend}->getCertAttribute(
+			ATTRIBUTE_LIST=>\@attList, DATA=>$self->getPEM());
 
 	if ( length( $ret->{SERIAL} ) % 2 ) {
         	$ret->{SERIAL} = "0" . $ret->{SERIAL};
@@ -233,7 +235,7 @@ sub parseCert {
 	}
 
 	## Parse Certificate and set right values;
-	( $ret->{VERSION} ) = ( $textCert =~ /Version: ([a-f\d]+)/i );
+	( $ret->{VERSION} ) = ( $textCert =~ /Version:\s+([a-f\d]+)/i );
 
         ( $ret->{SIG_ALGORITHM} ) =
 			 ( $textCert =~ /Signature Algorithm: ([^\n]+)/i );
@@ -299,6 +301,10 @@ This module provides an interface to X509 structures, no specific
 crypto functions are performed (see the OpenCA::OpenSSL module
 for this). When not said different, default operational format is
 PEM.
+
+NOTE: patched for object creation performance, compatible
+      with OpenCA::OpenSSL version 0.8.43 (+) and later.
+
 
 =head1 FUNCTIONS
 
