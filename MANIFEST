@@ -5,3 +5,4 @@ test.pl
 X509.pm
 prova.pl
 LICENSE
+META.yml                                 Module meta-data (added by MakeMaker)

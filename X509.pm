@@ -50,7 +50,7 @@
 ## [including the GNU Public Licence.]
 ##
 
-## the module's errorcode is 74
+## // the module's errorcode is 74
 ##
 ## functions
 ##
@@ -78,7 +78,7 @@ package OpenCA::X509;
 
 our ($errno, $errval);
 
-($OpenCA::X509::VERSION = '$Revision: 1.47 $' )=~ s/(?:^.*: (\d+))|(?:\s+\$$)/defined $1?"0\.9":""/eg;
+($OpenCA::X509::VERSION = '$Revision: 1.10 $' )=~ s/(?:^.*: (\d+))|(?:\s+\$$)/defined $1?"0\.9":""/eg;
 
 my %params = (
 	cert		=> undef,
@@ -135,6 +135,7 @@ sub new {
 	$infile		    = $keys->{INFILE};
 
 	$self->{backend}    = $keys->{SHELL};
+	$self->{gettext}    = $keys->{GETTEXT};
 
 	$self->{beginCert}	= "-----BEGIN CERTIFICATE-----";
 	$self->{endCert}	= "-----END CERTIFICATE-----";
@@ -142,29 +143,41 @@ sub new {
 	$self->{endHeader}	= "-----END HEADER-----";
 	$self->{beginAttribute}	= "-----BEGIN ATTRIBUTE-----";
 	$self->{endAttribute}	= "-----END ATTRIBUTE-----";
-	$self->{beginKey}	= "-----BEGIN ENCRYPTED PRIVATE KEY-----";
-	$self->{endKey}		= "-----END ENCRYPTED PRIVATE KEY-----";
+	$self->{beginKey}	= "-----BEGIN .*PRIVATE KEY-----";
+	$self->{endKey}		= "-----END .*PRIVATE KEY-----";
+
+	$self->_debug("OpenCA::X509::new start");
 
 	if( $infile ) {
 		$self->{item} = "";
 
 		open( FD, "<$infile" )
-			or return $self->setError (7411011, "OpenCA::X509->new: Cannot open infile $infile for reading.");
+			or return $self->setError (7411011,
+                                      $self->{gettext} ("OpenCA::X509->new: Cannot open infile __FILENAME__ for reading.",
+                                                        "__FILENAME__", $infile));
 		while ( $tmp = <FD> ) {
 			$self->{item} .= $tmp;
 		}
 		close( FD );
 	}
 
+	$self->_debug("OpenCA::X509::item loaded (" . $self->{item} . ")");
+
 	if ( defined($self->{item}) and $self->{item} ne "" ) {
 		$self->{cert} = $self->getBody( ITEM=>$self->{item} );
 
+		$self->_debug("OpenCA::X509::init starting");
 		if ( not $self->init() ) {
-			return $self->setError (7411021, "OpenCA::X509->new: Cannot initialize certificate ".
-						"($errno)\n$errval");
+			return $self->setError (7411021,
+                                   $self->{gettext} ("OpenCA::X509->new: Cannot initialize certificate (__ERRNO__). __ERRVAL__",
+                                                     "__ERRNO__", $errno,
+                                                     "__ERRVAL__", $errval));
 		}
 
+		$self->_debug("OpenCA::X509::init returned");
 	}
+
+	$self->_debug("OpenCA::X509::new completed ($self)");
 
         return $self;
 }
@@ -172,7 +185,8 @@ sub new {
 sub init {
 	my $self = shift;
 
-	return $self->setError (7412011, "OpenCA::X509->init: No certificate present.")
+	return $self->setError (7412011,
+                   $self->{gettext} ("OpenCA::X509->init: No certificate present."))
 		if (not $self->{cert});
 
 	$self->{pemCert} = "";
@@ -182,7 +196,10 @@ sub init {
 	$self->{txtCert} = "";
 
 	$self->{parsedItem} = $self->parseCert();
-	return $self->setError (7412031, "OpenCA::X509->init: Cannot parse certificate ($errno).\n$errval")
+	return $self->setError (7412031,
+                   $self->{gettext} ("OpenCA::X509->init: Cannot parse certificate (__ERRNO__). __ERRVAL__",
+                                     "__ERRNO__", $errno,
+                                     "__ERRVAL__", $errval))
 		if (not $self->{parsedItem});
 
         ## build pem-header
@@ -253,31 +270,46 @@ sub getHeader {
 sub getKey {
 	my $self = shift;
 	my $keys = { @_ };
-	my $req = $keys->{ITEM};
+	my $cert = $keys->{ITEM};
 
 	my $beginKey 	= $self->{beginKey};
 	my $endKey 	= $self->{endKey};
 
-	my ( $ret ) = ( $req =~ /($beginKey[\S\s\n]+$endKey)/ );
+	$cert = $self->{item} if ( $cert eq "" );
+
+	my ( $ret ) = ( $cert =~ /($beginKey[\S\s\n]+$endKey)/ );
+	return $ret;
+}
+
+sub getRawHeader {
+	my $self = shift;
+	my $keys = { @_ };
+	my $cert = $keys->{ITEM};
+
+	my $beginHeader	= $self->{beginHeader};
+	my $endHeader 	= $self->{endHeader};
+
+	my ( $ret ) = ( $cert =~ /($beginHeader[\S\s\n]+$endHeader)/ );
 	return $ret;
 }
 
 sub getBody {
 	my $self = shift;
 	my $keys = { @_ };
-	my $req = $keys->{ITEM};
+	my $cert = $keys->{ITEM};
 
 	my $beginCert 	= $self->{beginCert};
 	my $endCert	= $self->{endCert};
 
-	my ( $ret ) = ( $req =~ /($beginCert[\S\s\n]+$endCert)/ );
+	my ( $ret ) = ( $cert =~ /($beginCert[\S\s\n]+$endCert)/ );
 	return $ret;
 }
 
 sub getParsed {
 	my $self = shift;
 
-	return $self->setError (7431011, "OpenCA::X509->getParsed: The certificate was not parsed.")
+	return $self->setError (7431011,
+                   $self->{gettext} ("OpenCA::X509->getParsed: The certificate was not parsed."))
 		if ( not $self->{parsedItem} );
 	return $self->{parsedItem};
 }
@@ -292,27 +324,56 @@ sub parseCert {
 	my @attList = ( "SERIAL", "DN", "ISSUER", "NOTBEFORE", "NOTAFTER",
 			"ALIAS", "MODULUS", "PUBKEY", "FINGERPRINT", "HASH", "EMAILADDRESS",
 			"VERSION", "PUBKEY_ALGORITHM", "SIGNATURE_ALGORITHM", "EXPONENT",
-			"KEYSIZE", "EXTENSIONS" );
-	if ($self->{certFormat} eq "DER")
-	{
+			"KEYSIZE", "EXTENSIONS", "OPENSSL_SUBJECT", 
+			"HEX_SERIAL" );
+
+	$self->_debug("OpenCA::X509::parseCert() start" );
+
+	if ($self->{certFormat} eq "DER") {
+		$self->_debug("OpenCA::X509::parseCert() getCertAttribute" .
+								"(DER)" );
 		$ret = $self->{backend}->getCertAttribute(
 			ATTRIBUTE_LIST => \@attList,
 			DATA           => $self->getDER(),
 			INFORM         => "DER");
 	} else {
+		$self->_debug("OpenCA::X509::parseCert() getCertAttribute" .
+								"(PEM)" );
+		$self->_debug("OpenCA::X509::parseCert() getPem -> " .
+				$self->getPEM() );
+
 		$ret = $self->{backend}->getCertAttribute(
 			ATTRIBUTE_LIST => \@attList,
 			DATA           => $self->getPEM(),
 			INFORM         => "PEM");
+
+		$self->_debug("OpenCA::X509::parseCert() got cert ($ret)" );
 	}
 
-        print "OpenCA::X509->parseCert: DN: ".$ret->{SUBJECT}."<br>\n" if ($self->{DEBUG});
+	if( $self->{DEBUG} ) {
+		$self->_debug("OpenCA::X509->parseCert: DN: ".
+							$ret->{DN}."<br>\n");
+	}
+
+	#print STDERR "OpenCA::X509->parseCert: SERIAL: ".$ret->{SERIAL} ."\n";
 
 	$ret->{DN} =~ s/(^\/|\/$)//g;
 	$ret->{DN} =~ s/\/([A-Za-z0-9\-]+)=/, $1=/g;
 				
 	$ret->{ISSUER} =~ s/(^\/|\/$)//g;
 	$ret->{ISSUER} =~ s/\/([A-Za-z0-9\-]+)=/, $1=/g;
+
+	if ($ret->{EMAILADDRESS})
+	{
+		if (index ($ret->{EMAILADDRESS}, "\n") < 0 )
+		{
+			$ret->{EMAILADDRESSES}->[0] = $ret->{EMAILADDRESS};
+		} else {
+			my @harray = split /\n/, $ret->{EMAILADDRESS};
+			$ret->{EMAILADDRESSES} = \@harray;
+                        $ret->{EMAILADDRESS}   = $ret->{EMAILADDRESSES}->[0];
+		}
+	}
 
 	## OpenSSL includes a bug in -nameopt RFC2253
 	## = signs are not escaped if they are normal values
@@ -340,32 +401,54 @@ sub parseCert {
 
 	## load the differnt parts of the DN into DN_HASH
 	print "OpenCA::X509->parseCert: DN: ".$ret->{DN}."<br>\n" if ($self->{DEBUG});
-	if ($ret->{DN} =~ /\\/) {
-		my $x500_dn = X500::DN->ParseRFC2253 ($ret->{DN});
-		if (not $x500_dn) {
-       	 	print "OpenCA::X509->parseCert: X500::DN failed<br>\n" if ($self->{DEBUG});
-			return $self->setError (7413031, "OpenCA::X509->parseCert: X500::DN failed.");
-			return undef;
+	## X500::DN is too slow so we replace it by our own code
+	my $h_subject = $ret->{DN};
+	## duplicate normal characters in front of special characters
+	## because we remove these leading characters during split
+	$h_subject =~ s/([^\\])([+=,])/$1$1$2/g;
+	my @rdns = split /[^\\],/, $h_subject;
+	foreach my $rdn (@rdns) {
+		print "OpenCA::X509->parseCert: RDN: $rdn<br>\n"
+			if ($self->{DEBUG});
+		my @components = split /[^\\][=+]/, $rdn;
+		for (my $i=0; $i < scalar @components; $i++)
+		{
+			$components[$i] =~ s/\\([\s+=])/$1/g;
+			$components[$i] =~ s/^\s*//;
+			$components[$i] =~ s/\s*$//;
 		}
-		my $rdn;
-		foreach $rdn ($x500_dn->getRDNs()) {
-			next if ($rdn->isMultivalued());
-			my @attr_types = $rdn->getAttributeTypes();
-			my $type  = $attr_types[0];
-			my $value = $rdn->getAttributeValue ($type);
-			push (@{$ret->{DN_HASH}->{uc($type)}}, $value);
-			print "OpenCA::X509->parseCert: DN_HASH: $type=$value<br>\n" if ($self->{DEBUG});
+		for (my $i=0; $i < scalar @components; $i+=2)
+		{
+			push (@{$ret->{DN_HASH}->{uc($components[$i])}},
+			      $components[$i+1]);
+			print "OpenCA::X509->parseCert: DN_HASH: ".
+			      $components[$i]."=".
+                                     $components[$i+1]."<br>\n" if ($self->{DEBUG});
 		}
-	} else {
-		my @rdns = split /,/, $ret->{DN};
-		foreach my $rdn (@rdns) {
-			my ($type, $value) = split /=/, $rdn;
-			$type =~ s/^\s*//;
-			$type =~ s/\s*$//;
-			$value =~ s/^\s*//;
-			$value =~ s/\s*$//;
-			push (@{$ret->{DN_HASH}->{uc($type)}}, $value);
-			print "OpenCA::REQ->parseReq: DN_HASH: $type=$value<br>\n" if ($self->{DEBUG});
+	}
+
+	my $h_subject = $ret->{ISSUER};
+	## duplicate normal characters in front of special characters
+	## because we remove these leading characters during split
+	$h_subject =~ s/([^\\])([+=,])/$1$1$2/g;
+	my @rdns = split /[^\\],/, $h_subject;
+	foreach my $rdn (@rdns) {
+		print "OpenCA::X509->parseCert: RDN: $rdn<br>\n"
+			if ($self->{DEBUG});
+		my @components = split /[^\\][=+]/, $rdn;
+		for (my $i=0; $i < scalar @components; $i++)
+		{
+			$components[$i] =~ s/\\([\s+=])/$1/g;
+			$components[$i] =~ s/^\s*//;
+			$components[$i] =~ s/\s*$//;
+		}
+		for (my $i=0; $i < scalar @components; $i+=2)
+		{
+			push (@{$ret->{ISSUER_HASH}->{uc($components[$i])}},
+			      $components[$i+1]);
+			print "OpenCA::X509->parseCert: ISSUER_HASH: ".
+			      $components[$i]."=".
+                                     $components[$i+1]."<br>\n" if ($self->{DEBUG});
 		}
 	}
 
@@ -395,16 +478,23 @@ sub parseCert {
 
 	$i = 0;
 	while($i < @lines) {
-		if($lines[$i] =~ /^[\s\t]*[^:]+:\s*(critical|)\s*$/i) {
-			$key = $lines[$i];
-			$key =~ s/[\s\t]*:.*$//g;
-			$key =~ s/^[\s\t]*//g;
+		if($lines[$i] =~ /^\s*([^:]+):\s*(?:critical|)\s*$/i) {
+			$key = $1;
 			$ret->{OPENSSL_EXTENSIONS}->{$key} = [];
 			$i++;
-			while($lines[$i] !~ /^[\s\t].+:\s*$/ && $i < @lines) {
-				$val = $lines[$i];
-				$val =~ s/^[\s]+//g;
-				$val =~ s/[\s]+$//g;
+			while(exists $lines[$i] and 
+				$lines[$i] !~ /^\s*[^:]+:\s*(?:critical|)\s*$/ 
+							and $i < @lines) {
+			        $val = $lines[$i];
+				if ( $key =~ /CRL Distribution Points/ ) {
+					if ( $lines[$i] !~ /[a-zA-Z0-9]+/ ) {
+						$i++;
+						$val = $lines[$i];
+					}
+				}
+
+			        $val =~ s/^\s+//;
+			        $val =~ s/\s+$//;
 				$i++;
 				next if $val =~ /^$/;
 				push(@{$ret->{OPENSSL_EXTENSIONS}->{$key}}, $val);
@@ -437,7 +527,8 @@ sub parseCert {
 
 	$ret->{BODY}              = $self->getBody   (ITEM => $self->{item});
 	$ret->{HEADER}            = $self->getHeader (ITEM => $self->{item});
-	$ret->{KEY}               = $self->getKey    (ITEM => $self->{item});
+	$ret->{RAWHEADER}         = $self->getRawHeader ( ITEM=>$self->{item});
+	$ret->{PRIVKEY}           = $self->getKey    (ITEM => $self->{item});
 	$ret->{ITEM}              = $ret->{BODY};
 	$ret->{FLAG_EXPORT_STATE} = 0;
 
@@ -469,8 +560,10 @@ sub getPEM {
 					DATATYPE=>"CERTIFICATE",
 					INFORM=>$self->{certFormat},
 					OUTFORM=>"PEM" );
-		return $self->setError (7441005, "OpenCA::X509->getPEM: Cannot convert request to PEM-format ".
-				"(".$OpenCA::OpenSSL::errno.")\n".$OpenCA::OpenSSL::errval)
+		return $self->setError (7441005,
+                           $self->{gettext} ("OpenCA::X509->getPEM: Cannot convert certificate to PEM-format (__ERRNO__). __ERRVAL__",
+                                             "__ERRNO__", $OpenCA::OpenSSL::errno,
+                                             "__ERRVAL__", $OpenCA::OpenSSL::errval))
 			if (not $self->{pemCert});
 	}
 
@@ -482,7 +575,8 @@ sub getPEM {
 sub getPEMHeader {
 	my $self = shift;
 
-	return $self->setError (7442011, "OpenCA::X509->getPEMHeader: There is no PEM-header available.")
+	return $self->setError (7442011,
+                   $self->{gettext} ("OpenCA::X509->getPEMHeader: There is no PEM-header available."))
 		if (not $self->{pemHeader});
 	return $self->{pemHeader};
 }
@@ -498,8 +592,10 @@ sub getDER {
 					DATATYPE=>"CERTIFICATE",
 					INFORM=>$self->{certFormat},
 					OUTFORM=>"DER" );
-		return $self->setError (7443005, "OpenCA::X509->getDER: Cannot convert request to DER-format ".
-				"(".$OpenCA::OpenSSL::errno.")\n".$OpenCA::OpenSSL::errval)
+		return $self->setError (7443005,
+                           $self->{gettext} ("OpenCA::X509->getDER: Cannot convert certificate to DER-format (__ERRNO__). __ERRVAL__",
+                                             "__ERRNO__", $OpenCA::OpenSSL::errno,
+                                             "__ERRVAL__", $OpenCA::OpenSSL::errval))
 			if (not $self->{derCert});
 	}
 
@@ -516,8 +612,10 @@ sub getTXT {
 					DATATYPE=>"CERTIFICATE",
 					INFORM=>$self->{certFormat},
 					OUTFORM=>"TXT" );
-		return $self->setError (7444005, "OpenCA::X509->init: Cannot convert request to TXT-format ".
-				"(".$OpenCA::OpenSSL::errno.")\n".$OpenCA::OpenSSL::errval)
+		return $self->setError (7444005,
+                           $self->{gettext} ("OpenCA::X509->init: Cannot convert certificate to TXT-format (__ERRNO__). __ERRVAL__",
+                                             "__ERRNO__", $OpenCA::OpenSSL::errno,
+                                             "__ERRVAL__", $OpenCA::OpenSSL::errval))
 			if (not $self->{txtCert});
 	}
 
@@ -542,9 +640,9 @@ sub setHeaderAttribute {
   my $endAttribute = $self->{endAttribute};
 
   ## check certFormat to be PEM
-  return $self->setError (7451011, "OpenCA::X509->setHeaderAttribute: The request is not in PEM-format.")
+  return $self->setError (7451011,
+             $self->{gettext} ("OpenCA::X509->setHeaderAttribute: The certificate is not in PEM-format."))
 	if ($self->{certFormat} !~ /^PEM$/i);
-  print "X509->setHeaderAttribute: correct format - PEM<br>\n" if ($self->{DEBUG});
 
   ## check for header
   if ($self->{item} !~ /$beginHeader/) {
@@ -552,9 +650,14 @@ sub setHeaderAttribute {
     $self->{item} = $beginHeader."\n".$endHeader."\n".$self->{item};
   }
 
+  # print STDERR "ITEM => " . $self->{item} . "\n";
+
   for my $attribute (keys %{$keys}) {
 
-    print "X509->setHeaderAttribute: $attribute:=".$keys->{$attribute}."<br>\n" if ($self->{DEBUG});
+	next if ( not $attribute );
+    
+	# print "X509->setHeaderAttribute: $attribute:=" .
+	# 		$keys->{$attribute}."<br>\n" if ($self->{DEBUG});
 
     ## insert into item
     ## find last position in header
@@ -562,19 +665,31 @@ sub setHeaderAttribute {
     ## check fo multirow
     if ($keys->{$attribute} =~ /\n/) {
       ## multirow
-      $self->{item} =~ s/${endHeader}/${attribute}=\n${beginAttribute}\n$keys->{$attribute}\n${endAttribute}\n${endHeader}/;
+      $self->{item} =~ s/${endHeader}/${attribute} =\n${beginAttribute}\n$keys->{$attribute}\n${endAttribute}\n${endHeader}/;
     } else {
+      ## Delete old attribute
+	if ( $self->getParsed()->{HEADER}->{$attribute} ) {
+        	# print STDERR "REQ::setHeaderAttribute::Deleting $attribute\n";
+                $self->{item} =~ s/^$attribute[^\n]+\n//;
+        }
+
       ## single row
-      $self->{item} =~ s/${endHeader}/${attribute}=$keys->{$attribute}\n${endHeader}/;
+      $self->{item} =~ s/${endHeader}/${attribute} = $keys->{$attribute}\n${endHeader}/;
     }
 
   }
 
+  # print STDERR "AfterAttributes::ITEM => " . $self->{item} . "\n";
+
   ## if you call init then all information is lost !!!
-  return $self->setError (7451021, "OpenCA::X509->setHeaderAttribute: Cannot re-initialize the certificate ".
-			"($errno)\n$errval")
-  	if (not $self->init ( CERTIFICATE => $self->{item},
-                    FORMAT      => "PEM"));
+  if (not $self->init ( CERTIFICATE => $self->{item}, FORMAT => "PEM")) {
+	print STDERR "X509->setHeaderAttribute: $errno - $errval\n";
+
+  	return $self->setError (7451021,
+             $self->{gettext} ("OpenCA::X509->setHeaderAttribute: Cannot re-initialize the certificate (__ERRNO__). __ERRVAL__",
+                               "__ERRNO__", $errno,
+                               "__ERRVAL__", $errval))
+  }
 
   return 1;
 }
@@ -590,20 +705,40 @@ sub getItem {
 		$txtItem  .= $self->getPEMHeader ()."\n";
 	}
 	$txtItem .= $self->getPEM();
-	$txtItem .= $self->getParsed()->{KEY} || "";
+	$txtItem .= $self->getParsed()->{PRIVKEY} || "";
 
 	return $txtItem;
 }
 
 sub getSerial {
 	my $self = shift;
+	my $dataType = shift;
 
-	if (defined $_[0] and ( ($_[0] =~ /^CA/i) or ($_[0] =~ /CA_/i)) ) {
-		return $self->{backend}->getDigest ( DATA => $self->getPEM() );
+	if ( ( $dataType =~ /CA_CERTIFICATE/  ) or 
+			($self->getParsed()->{DATATYPE} =~ /CA_CERTIFICATE/) ) {
+		return $self->getFingerprint();
 	} else {
 		return $self->getParsed()->{SERIAL};
 	}
 }
+
+sub getFingerprint {
+	my $self = shift;
+	my $ret = undef;
+
+	return $self->{backend}->getFingerprint( CERT=>$self );
+
+	# $ret = $self->{backend}->getDigest(
+	# 		ALGORITHM => "sha1",
+	# 		DATA => $self->getDER());
+
+	# return $ret;
+
+	# return $self->{backend}->getDigest ( 
+	# 			ALGORITHM => "sha1",
+	# 			DATA => $self->getPEM() );
+}
+
 
 sub setParams {
 
@@ -614,6 +749,45 @@ sub setParams {
 	foreach $key ( keys %{$params} ) {
 		## we should place the parameters here
 	}
+
+	return 1;
+}
+
+sub getStatus {
+    my $self = shift;
+    return $self->{STATUS};
+}
+
+sub setStatus {
+	my $self = shift;
+	my $status = shift;
+
+	my $status_update = undef;
+	my $now = gmtime;
+
+	## Handles special fields like SUSPENDED_AFTER, REVOKED_AFTER, etc.
+	$status =~ s/\_.*//;
+	if (($self->{STATUS} ne $status) and ($status !~ /VALID/)) {
+		$status_update = $status . "_AFTER";
+		if( $self->getParsed()->{HEADER}->{$status_update} eq "" ) {
+			$self->setHeaderAttribute ( $status_update => $now );
+		}
+		# $self->{$status_update} = $now;
+	}
+
+	$self->{DATATYPE} = $self->{STATUS} . "_CERTIFICATE";
+	$self->{STATUS} = $status;
+
+	return $self->getStatus();
+}
+
+sub _debug {
+	my $self = shift;
+	my $text = join (" ", @_);
+
+	return 1 if ( $self->{DEBUG} ne 1 );
+
+	print STDERR "OpenCA::X509->$text\n";
 
 	return 1;
 }

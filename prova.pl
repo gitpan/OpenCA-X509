@@ -35,7 +35,9 @@ $openssl->issueCert( REQFILE=>"spkac.req", INFORMAT=>SPKAC );
 ## print "$k\n\n";
 ## my $X509 = new OpenCA::X509(DATA=>"$k", FORMAT=>"DER", SHELL=>$openssl);
 
-my $X509 = new OpenCA::X509(INFILE=>"cert.pem" , SHELL=>$openssl);
+my $X509 = new OpenCA::X509 (INFILE  => "cert.pem",
+                             GETTEXT => \&gettext,
+                             SHELL   => $openssl);
 
 print "ERROR!!!\n" if (not $X509);
 
@@ -65,6 +67,11 @@ print "         OU : " . $X509->getParsed()->{OU}[0] . "\n";
 ## foreach $tmp (@tmpfiles) {
 ## 	unlink( "$tmp" );
 ## }
+
+sub gettext
+{
+    return $_[0];
+}
 
 exit 0; 
 
